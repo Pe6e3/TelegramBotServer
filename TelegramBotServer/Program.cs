@@ -1,12 +1,13 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using System.Text;
+using System.Threading;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using System.Threading;
-using Microsoft.Data.SqlClient;
-using System.Text;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace DevSpaceConsole
 {
@@ -15,7 +16,6 @@ namespace DevSpaceConsole
         private static string _token { get; set; } = "5673535292:AAH6GJUPM-F2QFASxaYtyG3i6kmx8Tjgl4s";
         private static TelegramBotClient _client;
         private static Timer _timer;
-
         public static void Main()
         {
 
@@ -28,17 +28,18 @@ namespace DevSpaceConsole
             {
                 AllowedUpdates = Array.Empty<UpdateType>() // receive all update types except ChatMember related updates
             };
-            _client.StartReceiving(updateHandler:     HandleUpdateAsync,
-                                  pollingErrorHandler:HandlePollingErrorAsync,
-                                  receiverOptions:    receiverOptions,
-                                  cancellationToken:  cts.Token);
+            _client.StartReceiving(updateHandler: HandleUpdateAsync,
+            pollingErrorHandler: HandlePollingErrorAsync,
+            receiverOptions: receiverOptions,
+            cancellationToken: cts.Token);
 
             Console.WriteLine("Start");
 
             _timer = new Timer(GetMessagesFromDb, null, 3000, 3000);
 
             Console.ReadLine();
-            cts.Cancel();// Send cancellation request to stop bot
+            // Send cancellation request to stop bot
+            cts.Cancel();
         }
 
         private static void GetMessagesFromDb(object state)
@@ -109,13 +110,7 @@ namespace DevSpaceConsole
                 Console.WriteLine("Error: " + e.Message);
             }
         }
-        public static async Task SendMessageToTelegram(long chatId, string messageText)
-        {
-            // Echo received message text
-            await _client.SendTextMessageAsync(
-                chatId: chatId,
-                text: messageText);
-        }
+
         private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
             // Only process Message updates: https://core.telegram.org/bots/api#message
@@ -127,8 +122,132 @@ namespace DevSpaceConsole
 
             var chatId = message.Chat.Id;
 
+
             Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
-            SendMessageToTelegram(chatId, messageText);
+
+            SaveToDb(chatId, messageText, message.From.Username);
+
+            //SendMessageToTelegram(chatId, messageText);
+        }
+        public static async Task SaveToDb(long chatId, string messageText, string userName)
+        {
+            int? userId = await GetUserByChatId(chatId);
+            if (userId == null)
+            {
+                await SaveUser(chatId, userName);
+                userId = await GetUserByChatId(chatId);
+            }
+
+            await SaveMessage(chatId, messageText, userId);
+        }
+        private async static Task SaveMessage(long chatId, string messageText, int? userId)
+        {
+            //your connection string 
+            string connString = "Data Source=(local);Initial Catalog=DevSpaceBot;Integrated Security=True;Trust Server Certificate=true";
+            //create instanace of database connection
+            SqlConnection conn = new SqlConnection(connString);
+            try
+            {
+                //open connection
+                conn.Open();
+                //create a new SQL Query using StringBuilder
+
+                StringBuilder strBuilder2 = new StringBuilder();
+                strBuilder2.Append("Insert into Messages (MessageText, MessageDate, ChatId, IsOur, IsSended, UserId)  values ('");
+                strBuilder2.Append(messageText);
+                strBuilder2.Append("','");
+                strBuilder2.Append(DateTime.Now);
+                strBuilder2.Append("','");
+                strBuilder2.Append(chatId);
+                strBuilder2.Append("','");
+                strBuilder2.Append(0);
+                strBuilder2.Append("','");
+                strBuilder2.Append(1);
+                strBuilder2.Append("','");
+                strBuilder2.Append(userId);
+                strBuilder2.Append("')");
+                string sqlQuery2 = strBuilder2.ToString();
+
+                SqlCommand cmd2 = new SqlCommand(sqlQuery2, conn);
+                cmd2.ExecuteNonQuery();
+                strBuilder2.Clear(); // clear all the string
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error: " + e.Message);
+            }
+        }
+        private async static Task SaveUser(long chatId, string userName)
+        {
+            //your connection string 
+            string connString = "Data Source=(local);Initial Catalog=DevSpaceBot;Integrated Security=True;Trust Server Certificate=true";
+            //create instanace of database connection
+            SqlConnection conn = new SqlConnection(connString);
+            try
+            {
+                //open connection
+                conn.Open();
+                //create a new SQL Query using StringBuilder
+                StringBuilder strBuilder2 = new StringBuilder();
+                strBuilder2.Append("Insert into Users (Name, ChatId, IsActive, LastMessage)  values ('");
+                strBuilder2.Append(userName);
+                strBuilder2.Append("','");
+                strBuilder2.Append(chatId);
+                strBuilder2.Append("','");
+                strBuilder2.Append(1);
+                strBuilder2.Append("','");
+                strBuilder2.Append(DateTime.Now);
+                strBuilder2.Append("')");
+                string sqlQuery2 = strBuilder2.ToString();
+
+                SqlCommand cmd2 = new SqlCommand(sqlQuery2, conn);
+                cmd2.ExecuteNonQuery();
+                strBuilder2.Clear(); // clear all the string
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error: " + e.Message);
+            }
+        }
+        private async static Task<int?> GetUserByChatId(long chatId)
+        {
+            //your connection string 
+            string connString = "Data Source=(local);Initial Catalog=DevSpaceBot;Integrated Security=True;Trust Server Certificate=true";
+            //create instanace of database connection
+            SqlConnection conn = new SqlConnection(connString);
+            try
+            {
+                //open connection
+                conn.Open();
+                //create a new SQL Query using StringBuilder
+                StringBuilder strBuilder = new StringBuilder();
+
+                strBuilder.Append("SELECT * FROM Users WHERE ChatId = ");
+                strBuilder.Append(chatId);
+                string sqlQuery = strBuilder.ToString();
+
+                SqlCommand cmd = new SqlCommand(sqlQuery, conn);
+                SqlDataReader rdr = cmd.ExecuteReader();
+                while (rdr.Read())
+                {
+                    int id = Convert.ToInt32(rdr["Id"]);
+                    return id;
+                }
+                strBuilder.Clear(); // clear all the string
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error: " + e.Message);
+            }
+            return null;
+        }
+
+        public static async Task SendMessageToTelegram(long chatId, string messageText)
+        {
+            // Echo received message text
+            await _client.SendTextMessageAsync(
+                chatId: chatId,
+                text: messageText);
         }
 
         private static Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
@@ -145,8 +264,6 @@ namespace DevSpaceConsole
         }
     }
 }
-
-
 
 
 //private static void GetMessagesFromDb(object state)
